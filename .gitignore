@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .DS_Store
+.claude/
 
 # Not ready to share yet
 model_apex_v2.tflite
