@@ -3,14 +3,3 @@ __pycache__/
 *.pyc
 .DS_Store
 
-# Local dev-server config, not needed to run the app
-.claude/
-
-# Not ready to share yet - re-add with `git add -f` when it's time
-model_apex_v2.tflite
-
-# Working notes for continuing the project across sessions - not for the public repo
-HANDOFF.md
-
-# Hackathon PPT working files - not code
-ppt_build/
