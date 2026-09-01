@@ -1,0 +1,4 @@
+# Extra dependencies for train_model.py only. Not needed to run app.py.
+-r requirements.txt
+tensorflow-metal==1.2.0
+tf-keras==2.16.0

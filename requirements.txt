@@ -1,0 +1,15 @@
+# Netra dependencies
+streamlit
+numpy<2
+pillow
+opencv-python-headless<4.10
+
+# TFLite inference. tensorflow is the safe default (reliable pip wheels on
+# Windows/macOS/Linux). If you want a much lighter install and your platform
+# has a matching wheel, swap this line for: tflite-runtime
+#
+# Pinned to 2.16.2: tensorflow 2.20 crashes on import with
+# "libc++abi: mutex lock failed" on this machine (Python 3.9 + very new
+# macOS). 2.16.2 is confirmed working here. If you're on a different
+# machine and want the latest, try unpinning first.
+tensorflow==2.16.2
