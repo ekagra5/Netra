@@ -56,13 +56,10 @@ python3 -m venv .venv
 .venv/bin/streamlit run apex_app.py
 ```
 
-Retraining needs local copies of the datasets (see `train_model.py` for the
-expected paths):
-
-```bash
-.venv/bin/pip install -r requirements-train.txt
-.venv/bin/python train_model.py
-```
+`train_model.py` is what actually trained the model — it ran as a Kaggle
+Notebook (GPU P100) with all five datasets attached as inputs, so the
+`/kaggle/input/...` paths only resolve there. To rerun it: new Kaggle
+notebook, attach the five datasets listed above, paste the script in, run.
 
 Re-run the accuracy check:
 
@@ -74,7 +71,7 @@ Re-run the accuracy check:
 
 - `apex_app.py` — the app (English/Hindi, patient details, downloadable
   report, heatmap)
-- `model_apex_v2.tflite` — the trained model
-- `train_model.py` — training pipeline
+- `model_apex_v2.tflite` — the trained model (not in this repo yet — ask
+  for access)
+- `train_model.py` — the actual Kaggle training pipeline
 - `eval_new_model.py` — held-out test evaluation
-- `download_aptos.py` — APTOS download helper

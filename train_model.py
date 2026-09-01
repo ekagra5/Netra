@@ -1,49 +1,36 @@
 """
-Fine-tunes MobileNetV2 on IDRiD + APTOS + ODIR-5K for three outputs:
-  - dr_grade: DR severity, 5 classes (0-4)          [IDRiD, APTOS]
-  - dme: DME risk, 3 classes (0-2)                  [IDRiD only]
-  - ocular: 8 independent findings (multi-label)    [ODIR only]
-    N=normal, D=diabetes, G=glaucoma, C=cataract, A=AMD, H=hypertension,
-    M=myopia, O=other
-Each dataset only has labels for some outputs; sample weights mask out
-the losses a given row can't supervise (e.g. APTOS rows get zero weight
-on the dme and ocular losses).
+Trains the multi-head MobileNetV2 (DR grade + DME + ocular findings) on
+IDRiD, APTOS, EyePACS, ODIR-5K, and RFMiD, then exports model.tflite.
 
-Saves the result as model.tflite (float32, matching the original model's format).
-
-Usage: .venv/bin/python train_model.py
+This was run as a Kaggle Notebook (GPU P100) with all five datasets
+attached as inputs - the paths below assume that environment, not a
+local one. To reproduce: create a Kaggle notebook, attach the five
+datasets, paste this in, run.
 """
 
-import csv
-import os
-import random
-
-# TF 2.16's default Keras 3 path crashes the TFLite converter on this
-# machine's MobileNetV2 (MLIR "missing attribute 'value'" error). The
-# legacy Keras 2 path (needs the matching tf-keras==2.16.0 package) avoids it.
-os.environ.setdefault("TF_USE_LEGACY_KERAS", "1")
-
+import csv, os, random
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import layers, models
 
-DATA_ROOT = "/Users/ekagra/Downloads/B. Disease Grading"
-TRAIN_IMG_DIR = f"{DATA_ROOT}/1. Original Images/a. Training Set"
-TEST_IMG_DIR = f"{DATA_ROOT}/1. Original Images/b. Testing Set"
-TRAIN_CSV = f"{DATA_ROOT}/2. Groundtruths/a. IDRiD_Disease Grading_Training Labels.csv"
-TEST_CSV = f"{DATA_ROOT}/2. Groundtruths/b. IDRiD_Disease Grading_Testing Labels.csv"
+APTOS_CSV = '/kaggle/input/competitions/aptos2019-blindness-detection/train.csv'
+APTOS_IMG_DIR = '/kaggle/input/competitions/aptos2019-blindness-detection/train_images'
 
-APTOS_ROOT = "/Users/ekagra/Downloads/aptos2019"
-APTOS_IMG_DIR = f"{APTOS_ROOT}/train_images"
-APTOS_CSV = f"{APTOS_ROOT}/train.csv"
+IDRID_CSV = '/kaggle/input/datasets/mariaherrerot/idrid-dataset/idrid_labels.csv'
+IDRID_IMG_DIR = '/kaggle/input/datasets/mariaherrerot/idrid-dataset/Imagenes/Imagenes'
 
-ODIR_ROOT = "/Users/ekagra/Downloads/odir5k"
-ODIR_IMG_DIR = f"{ODIR_ROOT}/Training Images"
-ODIR_CSV = f"{ODIR_ROOT}/full_df.csv"
-ODIR_LABELS = ["N", "D", "G", "C", "A", "H", "M", "O"]
+ODIR_CSV = '/kaggle/input/datasets/andrewmvd/ocular-disease-recognition-odir5k/full_df.csv'
+ODIR_IMG_DIR = '/kaggle/input/datasets/andrewmvd/ocular-disease-recognition-odir5k/preprocessed_images'
+ODIR_LABELS = ['N', 'D', 'G', 'C', 'A', 'H', 'M', 'O']
+
+EYEPACS_ROOT = '/kaggle/input/datasets/sovitrath/diabetic-retinopathy-2015-data-colored-resized/colored_images/colored_images'
+EYEPACS_CLASSES = {'No_DR': 0, 'Mild': 1, 'Moderate': 2, 'Severe': 3, 'Proliferate_DR': 4}
+
+RFMID_ROOT = '/kaggle/input/datasets/ozlemhakdagli/retinal-fundus-multi-disease-image-dataset-rfmid'
+RFMID_SPLITS = [('Training_set', 'RFMiD_Training_Labels.csv'), ('Validation_set', 'RFMiD_Validation_Labels.csv'), ('Test_set', 'RFMiD_Testing_Labels.csv')]
 
 IMG_SIZE = 224
-BATCH_SIZE = 16
+BATCH_SIZE = 32
 SEED = 42
 NUM_GRADES = 5
 NUM_DME = 3
@@ -52,44 +39,57 @@ NUM_OCULAR = len(ODIR_LABELS)
 random.seed(SEED)
 tf.random.set_seed(SEED)
 
-# Row format: (path, grade, dme, ocular, has_grade, has_dme, has_ocular)
-# ocular is an 8-float list; unused fields are 0/zeros placeholders.
+
+# Row format: (path, grade, dme, ocular[8], ocular_mask[8], has_grade, has_dme)
+# ocular_mask marks which of the 8 findings this row actually has a label for,
+# since RFMiD only overlaps ODIR's ontology on D/A/M/N and the rest must be
+# masked out rather than treated as confirmed negatives.
 
 
-def load_labels(csv_path, img_dir):
-    """IDRiD: has both grade and DME labels."""
+def load_idrid(csv_path, img_dir):
+    train, test = [], []
+    with open(csv_path) as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            code = row.get('id_code', '')
+            grade = row.get('diagnosis', '')
+            dme = row.get('Risk of macular edema ', '')
+            if not code or grade == '' or dme == '':
+                continue
+            path = f'{img_dir}/{code}.jpg'
+            if not os.path.exists(path):
+                continue
+            entry = (path, int(float(grade)), int(float(dme)), [0.0] * NUM_OCULAR, [0.0] * NUM_OCULAR, True, True)
+            if 'test' in code:
+                test.append(entry)
+            else:
+                train.append(entry)
+    return train, test
+
+def load_aptos(csv_path, img_dir):
     rows = []
     with open(csv_path) as f:
         reader = csv.reader(f)
         next(reader)
         for row in reader:
-            if len(row) < 3 or row[1] == "" or row[2] == "":
+            if len(row) < 2 or row[1] == '':
                 continue
-            path = f"{img_dir}/{row[0]}.jpg"
+            path = f'{img_dir}/{row[0]}.png'
             if os.path.exists(path):
-                rows.append((path, int(row[1]), int(row[2]), [0.0] * NUM_OCULAR, True, True, False))
+                rows.append((path, int(row[1]), 0, [0.0] * NUM_OCULAR, [0.0] * NUM_OCULAR, True, False))
     return rows
 
-
-def load_aptos_labels(csv_path, img_dir):
-    """APTOS: grade only, no DME."""
+def load_eyepacs(root, classes):
     rows = []
-    with open(csv_path) as f:
-        reader = csv.reader(f)
-        next(reader)
-        for row in reader:
-            if len(row) < 2 or row[1] == "":
-                continue
-            path = f"{img_dir}/{row[0]}.png"
-            if os.path.exists(path):
-                rows.append((path, int(row[1]), 0, [0.0] * NUM_OCULAR, True, False, False))
+    for name, grade in classes.items():
+        folder = f'{root}/{name}'
+        if not os.path.isdir(folder):
+            continue
+        for fname in os.listdir(folder):
+            rows.append((f'{folder}/{fname}', grade, 0, [0.0] * NUM_OCULAR, [0.0] * NUM_OCULAR, True, False))
     return rows
 
-
-def load_odir_labels(csv_path, img_dir):
-    """ODIR-5K: 8-way multi-label ocular findings, no DR grade/DME.
-    One row per patient covering both eyes; both eye images get the same
-    patient-level label (standard simplification for this dataset)."""
+def load_odir(csv_path, img_dir):
     rows = []
     with open(csv_path) as f:
         reader = csv.DictReader(f)
@@ -98,15 +98,48 @@ def load_odir_labels(csv_path, img_dir):
                 ocular = [float(row[c]) for c in ODIR_LABELS]
             except (KeyError, ValueError):
                 continue
-            for col in ("Left-Fundus", "Right-Fundus"):
-                name = row.get(col, "")
+            mask = [1.0] * NUM_OCULAR
+            for col in ('Left-Fundus', 'Right-Fundus'):
+                name = row.get(col, '')
                 if not name:
                     continue
-                path = f"{img_dir}/{name}"
+                path = f'{img_dir}/{name}'
                 if os.path.exists(path):
-                    rows.append((path, 0, 0, ocular, False, False, True))
+                    rows.append((path, 0, 0, ocular, mask, False, False))
     return rows
 
+def load_rfmid(root, splits):
+    rows = []
+    for folder, csv_name in splits:
+        img_dir = f'{root}/{folder}'
+        csv_path = f'{img_dir}/{csv_name}'
+        if not os.path.exists(csv_path):
+            continue
+        with open(csv_path, encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    risk = float(row['Disease_Risk'])
+                    dr = float(row['DR'])
+                    armd = float(row['ARMD'])
+                    mya = float(row['MYA'])
+                except (KeyError, ValueError):
+                    continue
+                path = f"{img_dir}/{row['ID']}.png"
+                if not os.path.exists(path):
+                    continue
+                ocular = [0.0] * NUM_OCULAR
+                mask = [0.0] * NUM_OCULAR
+                ocular[ODIR_LABELS.index('D')] = dr
+                mask[ODIR_LABELS.index('D')] = 1.0
+                ocular[ODIR_LABELS.index('A')] = armd
+                mask[ODIR_LABELS.index('A')] = 1.0
+                ocular[ODIR_LABELS.index('M')] = mya
+                mask[ODIR_LABELS.index('M')] = 1.0
+                ocular[ODIR_LABELS.index('N')] = 1.0 - risk
+                mask[ODIR_LABELS.index('N')] = 1.0
+                rows.append((path, 0, 0, ocular, mask, False, False))
+    return rows
 
 def stratified_split(rows, val_fraction=0.15):
     by_grade = {}
@@ -123,7 +156,6 @@ def stratified_split(rows, val_fraction=0.15):
     rng.shuffle(val)
     return train, val
 
-
 def random_split(rows, val_fraction=0.15):
     rng = random.Random(SEED)
     rows = rows[:]
@@ -131,38 +163,33 @@ def random_split(rows, val_fraction=0.15):
     n_val = max(1, int(len(rows) * val_fraction))
     return rows[n_val:], rows[:n_val]
 
-
 def oversample_by_grade(rows, cap=4):
-    """Repeats rows from underrepresented grades so each epoch sees a more
-    balanced mix. Only meaningful for grade-labeled rows (IDRiD/APTOS)."""
     counts = np.zeros(NUM_GRADES)
     for r in rows:
         counts[r[1]] += 1
     max_count = counts.max()
-
     balanced = []
     for r in rows:
         repeat = min(cap, max(1, round(max_count / counts[r[1]])))
         balanced += [r] * repeat
     return balanced
 
-
 def oversample_ocular(rows, cap=4):
-    """Repeats ODIR rows containing rare positive findings (hypertension,
-    glaucoma, AMD, myopia are all under 6% prevalence) so the model sees
-    them often enough to learn them instead of always predicting "no"."""
     counts = np.zeros(NUM_OCULAR)
     for r in rows:
-        counts += np.array(r[3])
+        ocular = np.array(r[3])
+        mask = np.array(r[4])
+        counts += ocular * mask
     max_count = max(counts.max(), 1)
-
     balanced = []
     for r in rows:
         ocular = np.array(r[3])
-        if ocular.sum() == 0:
+        mask = np.array(r[4])
+        positive = (ocular == 1) & (mask == 1)
+        if not positive.any():
             repeat = 1
         else:
-            rarest = counts[ocular == 1].min()
+            rarest = counts[positive].min()
             repeat = min(cap, max(1, round(max_count / rarest)))
         balanced += [r] * repeat
     return balanced
@@ -172,40 +199,35 @@ def make_dataset(rows, training):
     paths = [r[0] for r in rows]
     grades = [r[1] for r in rows]
     dmes = [r[2] for r in rows]
-    oculars = [r[3] for r in rows]
-    has_grade = [float(r[4]) for r in rows]
-    has_dme = [float(r[5]) for r in rows]
-    has_ocular = [float(r[6]) for r in rows]
+    ocular_targets = [r[3] + r[4] for r in rows]
+    has_grade = [float(r[5]) for r in rows]
+    has_dme = [float(r[6]) for r in rows]
 
-    ds = tf.data.Dataset.from_tensor_slices(
-        (paths, grades, dmes, oculars, has_grade, has_dme, has_ocular)
-    )
+    ds = tf.data.Dataset.from_tensor_slices((paths, grades, dmes, ocular_targets, has_grade, has_dme))
 
-    def load(path, grade, dme, ocular, hg, hd, ho):
+    def load(path, grade, dme, ocular_target, hg, hd):
         img = tf.io.read_file(path)
-        # decode_image (not decode_jpeg): APTOS/ODIR are .png/.jpg mixed
         img = tf.io.decode_image(img, channels=3, expand_animations=False)
         img = tf.image.resize(img, [IMG_SIZE, IMG_SIZE])
-        return img, grade, dme, ocular, hg, hd, ho
+        return img, grade, dme, ocular_target, hg, hd
 
     ds = ds.map(load, num_parallel_calls=tf.data.AUTOTUNE)
 
     if training:
-        def augment(img, grade, dme, ocular, hg, hd, ho):
+        def augment(img, grade, dme, ocular_target, hg, hd):
             img = tf.image.random_flip_left_right(img)
             img = tf.image.random_flip_up_down(img)
             img = tf.image.random_brightness(img, 0.15)
             img = tf.image.random_contrast(img, 0.85, 1.15)
             img = tf.clip_by_value(img, 0.0, 255.0)
-            return img, grade, dme, ocular, hg, hd, ho
+            return img, grade, dme, ocular_target, hg, hd
         ds = ds.map(augment, num_parallel_calls=tf.data.AUTOTUNE)
 
-    def preprocess(img, grade, dme, ocular, hg, hd, ho):
+    def preprocess(img, grade, dme, ocular_target, hg, hd):
         img = tf.keras.applications.mobilenet_v2.preprocess_input(img)
-        labels = {"dr_grade": grade, "dme": dme, "ocular": ocular}
-        sample_weight = {"dr_grade": hg, "dme": hd, "ocular": ho}
+        labels = {'dr_grade': grade, 'dme': dme, 'ocular': ocular_target}
+        sample_weight = {'dr_grade': hg, 'dme': hd, 'ocular': 1.0}
         return img, labels, sample_weight
-
     ds = ds.map(preprocess, num_parallel_calls=tf.data.AUTOTUNE)
 
     if training:
@@ -213,119 +235,141 @@ def make_dataset(rows, training):
     return ds.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
 
 
-def build_model():
-    base = tf.keras.applications.MobileNetV2(
-        input_shape=(IMG_SIZE, IMG_SIZE, 3), include_top=False, weights="imagenet"
-    )
-    base.trainable = False
+def masked_ocular_loss(y_true, y_pred):
+    labels = y_true[:, :NUM_OCULAR]
+    mask = y_true[:, NUM_OCULAR:]
+    bce = tf.keras.backend.binary_crossentropy(labels, y_pred)
+    bce = bce * mask
+    denom = tf.reduce_sum(mask, axis=1) + 1e-8
+    return tf.reduce_sum(bce, axis=1) / denom
 
+
+def masked_ocular_accuracy(y_true, y_pred):
+    labels = y_true[:, :NUM_OCULAR]
+    mask = y_true[:, NUM_OCULAR:]
+    correct = tf.cast(tf.equal(labels, tf.round(y_pred)), tf.float32) * mask
+    denom = tf.reduce_sum(mask, axis=1) + 1e-8
+    return tf.reduce_sum(correct, axis=1) / denom
+
+
+def build_model():
+    base = tf.keras.applications.MobileNetV2(input_shape=(IMG_SIZE, IMG_SIZE, 3), include_top=False, weights='imagenet')
+    base.trainable = False
     x = layers.GlobalAveragePooling2D()(base.output)
     x = layers.Dropout(0.3)(x)
-
-    grade_out = layers.Dense(NUM_GRADES, activation="softmax", name="dr_grade")(x)
-    dme_out = layers.Dense(NUM_DME, activation="softmax", name="dme")(x)
-    ocular_out = layers.Dense(NUM_OCULAR, activation="sigmoid", name="ocular")(x)
-
-    model = models.Model(base.input, [grade_out, dme_out, ocular_out])
+    grade_out = layers.Dense(NUM_GRADES, activation='softmax', name='dr_grade')(x)
+    dme_out = layers.Dense(NUM_DME, activation='softmax', name='dme')(x)
+    ocular_out = layers.Dense(NUM_OCULAR, activation='sigmoid', name='ocular')(x)
+    model = models.Model(base.input, {'dr_grade': grade_out, 'dme': dme_out, 'ocular': ocular_out})
     return model, base
 
-
-LOSSES = {
-    "dr_grade": "sparse_categorical_crossentropy",
-    "dme": "sparse_categorical_crossentropy",
-    "ocular": "binary_crossentropy",
-}
-METRICS = {"dr_grade": "accuracy", "dme": "accuracy", "ocular": "binary_accuracy"}
-# DR grade is the core screening task; without this, gradients from the
-# (much larger) ocular task pull the shared backbone away from what's
-# optimal for grading, since all three losses update the same trunk.
-LOSS_WEIGHTS = {"dr_grade": 2.0, "dme": 1.5, "ocular": 1.0}
+LOSSES = {'dr_grade': 'sparse_categorical_crossentropy', 'dme': 'sparse_categorical_crossentropy', 'ocular': masked_ocular_loss}
+METRICS = {'dr_grade': 'accuracy', 'dme': 'accuracy', 'ocular': masked_ocular_accuracy}
+LOSS_WEIGHTS = {'dr_grade': 2.0, 'dme': 1.5, 'ocular': 1.0}
 
 
-def main():
-    idrid_train = load_labels(TRAIN_CSV, TRAIN_IMG_DIR)
-    # test set is always IDRiD-only, so accuracy stays comparable across runs
-    test_rows = load_labels(TEST_CSV, TEST_IMG_DIR)
-    idrid_train, idrid_val = stratified_split(idrid_train)
+idrid_train, test_rows = load_idrid(IDRID_CSV, IDRID_IMG_DIR)
+idrid_train, idrid_val = stratified_split(idrid_train)
+grade_train = idrid_train
+val_rows = idrid_val
+print(f'IDRiD train={len(idrid_train)} val={len(idrid_val)} test={len(test_rows)}')
 
-    grade_train = idrid_train
-    val_rows = idrid_val
+aptos_rows = load_aptos(APTOS_CSV, APTOS_IMG_DIR)
+aptos_train, aptos_val = stratified_split(aptos_rows)
+grade_train = grade_train + aptos_train
+val_rows = val_rows + aptos_val
+print(f'APTOS train={len(aptos_train)} val={len(aptos_val)}')
 
-    have_aptos = os.path.exists(APTOS_CSV)
-    if have_aptos:
-        aptos_train = load_aptos_labels(APTOS_CSV, APTOS_IMG_DIR)
-        aptos_train, aptos_val = stratified_split(aptos_train)
-        grade_train = idrid_train + aptos_train
-        val_rows = val_rows + aptos_val
-        print(f"IDRiD train={len(idrid_train)}  APTOS train={len(aptos_train)}")
-    else:
-        print("APTOS not found, training on IDRiD only")
+eyepacs_rows = load_eyepacs(EYEPACS_ROOT, EYEPACS_CLASSES)
+eyepacs_train, eyepacs_val = stratified_split(eyepacs_rows)
+grade_train = grade_train + eyepacs_train
+val_rows = val_rows + eyepacs_val
+print(f'EyePACS train={len(eyepacs_train)} val={len(eyepacs_val)}')
 
-    train_rows = oversample_by_grade(grade_train)
-    print(f"grade-labeled train after oversampling: {len(train_rows)}")
+train_rows = oversample_by_grade(grade_train)
+print(f'grade-labeled train after oversampling: {len(train_rows)}')
 
-    have_odir = os.path.exists(ODIR_CSV)
-    if have_odir:
-        odir_rows = load_odir_labels(ODIR_CSV, ODIR_IMG_DIR)
-        odir_train, odir_val = random_split(odir_rows)
-        odir_train_balanced = oversample_ocular(odir_train)
-        train_rows = train_rows + odir_train_balanced
-        val_rows = val_rows + odir_val
-        print(f"ODIR train={len(odir_train)} -> {len(odir_train_balanced)} after oversampling  ODIR val={len(odir_val)}")
-    else:
-        print("ODIR not found, training without ocular findings head")
+odir_rows = load_odir(ODIR_CSV, ODIR_IMG_DIR)
+odir_train, odir_val = random_split(odir_rows)
 
-    print(f"train={len(train_rows)} val={len(val_rows)} test={len(test_rows)}")
+rfmid_rows = load_rfmid(RFMID_ROOT, RFMID_SPLITS)
+rfmid_train, rfmid_val = random_split(rfmid_rows)
 
-    train_ds = make_dataset(train_rows, training=True)
-    val_ds = make_dataset(val_rows, training=False)
-    test_ds = make_dataset(test_rows, training=False)
-
-    model, base = build_model()
-
-    # legacy optimizer: the current tf.keras.optimizers.Adam is slow on Apple Silicon
-    model.compile(
-        optimizer=tf.keras.optimizers.legacy.Adam(1e-3),
-        loss=LOSSES,
-        loss_weights=LOSS_WEIGHTS,
-        weighted_metrics=METRICS,
-    )
-
-    print("\n--- Phase 1: frozen backbone ---")
-    model.fit(train_ds, validation_data=val_ds, epochs=14)
-
-    print("\n--- Phase 2: fine-tune last layers ---")
-    base.trainable = True
-    for layer in base.layers[:-60]:
-        layer.trainable = False
-
-    model.compile(
-        optimizer=tf.keras.optimizers.legacy.Adam(1e-5),
-        loss=LOSSES,
-        loss_weights=LOSS_WEIGHTS,
-        weighted_metrics=METRICS,
-    )
-    model.fit(train_ds, validation_data=val_ds, epochs=20)
-
-    # Note: an earlier IDRiD-only "recalibration" phase 3 was tried and made
-    # things worse on this small a test set (see project notes) - dropped.
-
-    print("\n--- Test set evaluation (DR grade + DME, IDRiD only) ---")
-    results = model.evaluate(test_ds, return_dict=True)
-    print(results)
-
-    if have_odir:
-        print("\n--- Ocular findings evaluation (ODIR val split) ---")
-        odir_val_ds = make_dataset(odir_val, training=False)
-        odir_results = model.evaluate(odir_val_ds, return_dict=True)
-        print(odir_results)
-
-    converter = tf.lite.TFLiteConverter.from_keras_model(model)
-    tflite_model = converter.convert()
-    with open("model.tflite", "wb") as f:
-        f.write(tflite_model)
-    print("\nSaved model.tflite")
+ocular_train = oversample_ocular(odir_train + rfmid_train)
+train_rows = train_rows + ocular_train
+val_rows = val_rows + odir_val + rfmid_val
+print(f'ODIR train={len(odir_train)} RFMiD train={len(rfmid_train)} -> {len(ocular_train)} after oversampling')
+print(f'train={len(train_rows)} val={len(val_rows)} test={len(test_rows)}')
 
 
-if __name__ == "__main__":
-    main()
+train_ds = make_dataset(train_rows, training=True)
+val_ds = make_dataset(val_rows, training=False)
+test_ds = make_dataset(test_rows, training=False)
+
+model, base = build_model()
+model.compile(optimizer=tf.keras.optimizers.Adam(1e-3), loss=LOSSES, loss_weights=LOSS_WEIGHTS, weighted_metrics=METRICS)
+
+print('Phase 1: frozen backbone')
+model.fit(train_ds, validation_data=val_ds, epochs=14)
+model.save('phase1_model.keras')
+
+
+print('Phase 2: fine-tune last layers')
+base.trainable = True
+for layer in base.layers[:-60]:
+    layer.trainable = False
+
+model.compile(optimizer=tf.keras.optimizers.Adam(1e-5), loss=LOSSES, loss_weights=LOSS_WEIGHTS, weighted_metrics=METRICS)
+model.fit(train_ds, validation_data=val_ds, epochs=20)
+model.save('final_model.keras')
+
+
+from sklearn.metrics import confusion_matrix, classification_report
+
+y_true_grade, y_pred_grade, y_true_dme, y_pred_dme = [], [], [], []
+for imgs, labels, _ in test_ds:
+    preds = model.predict(imgs, verbose=0)
+    y_true_grade += labels['dr_grade'].numpy().tolist()
+    y_pred_grade += np.argmax(preds['dr_grade'], axis=1).tolist()
+    y_true_dme += labels['dme'].numpy().tolist()
+    y_pred_dme += np.argmax(preds['dme'], axis=1).tolist()
+
+print('DR grade confusion matrix (rows=true, cols=pred):')
+print(confusion_matrix(y_true_grade, y_pred_grade))
+print(classification_report(y_true_grade, y_pred_grade, digits=3))
+
+print('DME confusion matrix:')
+print(confusion_matrix(y_true_dme, y_pred_dme))
+print(classification_report(y_true_dme, y_pred_dme, digits=3))
+
+
+ocular_val_rows = odir_val + rfmid_val
+ocular_val_ds = make_dataset(ocular_val_rows, training=False)
+
+y_true_ocular, y_pred_ocular, mask_ocular = [], [], []
+for imgs, labels, _ in ocular_val_ds:
+    preds = model.predict(imgs, verbose=0)
+    target = labels['ocular'].numpy()
+    y_true_ocular.append(target[:, :NUM_OCULAR])
+    mask_ocular.append(target[:, NUM_OCULAR:])
+    y_pred_ocular.append((preds['ocular'] > 0.5).astype(float))
+
+y_true_ocular = np.concatenate(y_true_ocular)
+y_pred_ocular = np.concatenate(y_pred_ocular)
+mask_ocular = np.concatenate(mask_ocular)
+
+print('Ocular findings per-class, only over rows with a known label:')
+for i, name in enumerate(ODIR_LABELS):
+    known = mask_ocular[:, i] == 1
+    if known.sum() == 0:
+        print(f'{name}: no labeled examples')
+        continue
+    print(f'{name}:')
+    print(classification_report(y_true_ocular[known, i], y_pred_ocular[known, i], digits=3, zero_division=0))
+
+
+converter = tf.lite.TFLiteConverter.from_keras_model(model)
+tflite_model = converter.convert()
+with open('model.tflite', 'wb') as f:
+    f.write(tflite_model)
+print('Saved model.tflite')
