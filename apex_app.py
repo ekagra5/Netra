@@ -972,34 +972,29 @@ def ocular_table(result):
         prob = float(result["ocular"][OCULAR_ORDER.index(code)])
         flagged = prob >= OCULAR_THRESHOLD
         rows.append(
-            f"""
-            <tr>
-                <td>{esc(OCULAR_NAMES[code][st.session_state.language])}</td>
-                <td>{esc(likelihood_label(prob))}</td>
-                <td><span class="badge {'flag' if flagged else ''}">{esc(tr('flagged') if flagged else tr('not_flagged'))}</span></td>
-                <td class="score">{esc(pct(prob))}</td>
-            </tr>
-            """
+            "<tr>"
+            f"<td>{esc(OCULAR_NAMES[code][st.session_state.language])}</td>"
+            f"<td>{esc(likelihood_label(prob))}</td>"
+            f"<td><span class=\"badge {'flag' if flagged else ''}\">{esc(tr('flagged') if flagged else tr('not_flagged'))}</span></td>"
+            f"<td class=\"score\">{esc(pct(prob))}</td>"
+            "</tr>"
         )
-    st.markdown(
-        f"""
-        <div class="panel">
-            <div class="section-label">{esc(tr("other"))}</div>
-            <table class="finding-table">
-                <thead>
-                    <tr>
-                        <th>{esc(tr("finding"))}</th>
-                        <th>{esc(tr("likelihood"))}</th>
-                        <th>{esc(tr("risk"))}</th>
-                        <th>{esc(tr("probability"))}</th>
-                    </tr>
-                </thead>
-                <tbody>{''.join(rows)}</tbody>
-            </table>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    # Built as one unbroken line (no blank lines, no leading indentation) -
+    # a multi-line indented HTML string here gets misread by Streamlit's
+    # markdown parser as a code block instead of raw HTML.
+    table_html = (
+        '<div class="panel">'
+        f'<div class="section-label">{esc(tr("other"))}</div>'
+        '<table class="finding-table"><thead><tr>'
+        f'<th>{esc(tr("finding"))}</th>'
+        f'<th>{esc(tr("likelihood"))}</th>'
+        f'<th>{esc(tr("risk"))}</th>'
+        f'<th>{esc(tr("probability"))}</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(rows)}</tbody>'
+        '</table></div>'
     )
+    st.markdown(table_html, unsafe_allow_html=True)
 
 
 def verification_panel(result):
