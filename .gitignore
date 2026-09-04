@@ -1,15 +1,12 @@
+# Python (training/)
 .venv/
 __pycache__/
 *.pyc
+
+# OS / editor
 .DS_Store
+.idea/
+.vscode/
+
+# Local dev config, not for the repo
 .claude/
-
-# Not ready to share yet
-model_apex_v2.tflite
-
-# Working notes for continuing the project across sessions - not for the repo
-HANDOFF.md
-
-# Hackathon PPT working files - not code
-ppt_build/
-
