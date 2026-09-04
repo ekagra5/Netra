@@ -8,10 +8,33 @@ import '../state/app_state.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 
-class CaptureScreen extends StatelessWidget {
+class CaptureScreen extends StatefulWidget {
   const CaptureScreen({super.key});
 
-  Future<void> _pick(BuildContext context, ImageSource source) async {
+  @override
+  State<CaptureScreen> createState() => _CaptureScreenState();
+}
+
+class _CaptureScreenState extends State<CaptureScreen> {
+  late final TextEditingController _nameController;
+  late final TextEditingController _ageController;
+
+  @override
+  void initState() {
+    super.initState();
+    final state = context.read<AppState>();
+    _nameController = TextEditingController(text: state.pendingPatientName);
+    _ageController = TextEditingController(text: state.pendingPatientAge);
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _ageController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pick(ImageSource source) async {
     final state = context.read<AppState>();
     final picker = ImagePicker();
     final xfile = await picker.pickImage(source: source, maxWidth: 2048, maxHeight: 2048);
@@ -25,6 +48,10 @@ class CaptureScreen extends StatelessWidget {
     final state = context.watch<AppState>();
     final t = state.t;
     final hasImage = state.pendingImage != null;
+    // Only ask for patient details on a fresh scan - startNewScanForPatient
+    // (from the patient record screen) already has a patient, and re-asking
+    // for their name there would just be busywork.
+    final needsPatientDetails = state.currentPatient == null;
 
     return Scaffold(
       backgroundColor: NetraColors.bg,
@@ -36,7 +63,25 @@ class CaptureScreen extends StatelessWidget {
               title: t['newScanTitle'],
             ),
             NsBody(
-              child: hasImage ? _ImagePreview(state: state, t: t) : _SourcePicker(t: t, onPick: (s) => _pick(context, s)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (needsPatientDetails) ...[
+                    _PatientDetailsForm(
+                      state: state,
+                      t: t,
+                      nameController: _nameController,
+                      ageController: _ageController,
+                    ),
+                    const SizedBox(height: NetraSpace.s5),
+                    const Divider(),
+                    const SizedBox(height: NetraSpace.s4),
+                  ],
+                  hasImage
+                      ? _ImagePreview(state: state, t: t)
+                      : _SourcePicker(t: t, onPick: _pick),
+                ],
+              ),
             ),
             if (hasImage)
               Container(
@@ -61,6 +106,121 @@ class CaptureScreen extends StatelessWidget {
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PatientDetailsForm extends StatelessWidget {
+  final AppState state;
+  final dynamic t;
+  final TextEditingController nameController;
+  final TextEditingController ageController;
+
+  const _PatientDetailsForm({
+    required this.state,
+    required this.t,
+    required this.nameController,
+    required this.ageController,
+  });
+
+  static const _sexOptions = ['male', 'female', 'other'];
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        NsSectionLabel(t['patientDetails']),
+        TextField(
+          controller: nameController,
+          textCapitalization: TextCapitalization.words,
+          onChanged: state.setPendingPatientName,
+          decoration: InputDecoration(
+            labelText: '${t['patientName']} (${t['optional']})',
+            border: OutlineInputBorder(
+              borderSide: const BorderSide(color: NetraColors.dividerStrong, width: 2),
+              borderRadius: BorderRadius.circular(NetraRadius.card),
+            ),
+          ),
+        ),
+        const SizedBox(height: NetraSpace.s3),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: ageController,
+                keyboardType: TextInputType.number,
+                onChanged: state.setPendingPatientAge,
+                decoration: InputDecoration(
+                  labelText: '${t['age']} (${t['optional']})',
+                  border: OutlineInputBorder(
+                    borderSide: const BorderSide(color: NetraColors.dividerStrong, width: 2),
+                    borderRadius: BorderRadius.circular(NetraRadius.card),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: NetraSpace.s3),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${t['sex']} (${t['optional']})',
+                    style: const TextStyle(fontSize: 12, color: NetraColors.inkMuted),
+                  ),
+                  const SizedBox(height: NetraSpace.s2),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final option in _sexOptions)
+                        _SexChip(
+                          label: t[option],
+                          selected: state.pendingPatientSex == option,
+                          onTap: () => state.setPendingPatientSex(
+                            state.pendingPatientSex == option ? '' : option,
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _SexChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _SexChip({required this.label, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? NetraColors.red600 : Colors.transparent,
+          border: Border.all(color: selected ? NetraColors.red600 : NetraColors.dividerStrong, width: 2),
+          borderRadius: BorderRadius.circular(NetraRadius.card),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: selected ? Colors.white : NetraColors.ink,
+          ),
         ),
       ),
     );

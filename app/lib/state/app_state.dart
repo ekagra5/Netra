@@ -48,6 +48,16 @@ class AppState extends ChangeNotifier {
   File? pendingImage;
   bool isAnalyzing = false;
 
+  // Patient details entered on the capture screen, before analysis runs.
+  // All optional except name, which falls back to a placeholder - matching
+  // the original apex_app.py patient form's fields (minus a separate
+  // free-text "Patient ID": the app already assigns its own internal id,
+  // and adding a second, unrelated id field wasn't worth the extra DB
+  // schema/UI for this pass).
+  String pendingPatientName = '';
+  String pendingPatientAge = '';
+  String pendingPatientSex = '';
+
   List<List<double>>? heatmapGrid;
   bool showHeatmapOverlay = true;
   bool heatmapLoading = false;
@@ -108,6 +118,9 @@ class AppState extends ChangeNotifier {
   void startNewScan() {
     pendingImage = null;
     currentPatient = null;
+    pendingPatientName = '';
+    pendingPatientAge = '';
+    pendingPatientSex = '';
     screen = AppScreen.capture;
     notifyListeners();
   }
@@ -126,6 +139,19 @@ class AppState extends ChangeNotifier {
 
   void retakeImage() {
     pendingImage = null;
+    notifyListeners();
+  }
+
+  void setPendingPatientName(String v) {
+    pendingPatientName = v;
+  }
+
+  void setPendingPatientAge(String v) {
+    pendingPatientAge = v;
+  }
+
+  void setPendingPatientSex(String v) {
+    pendingPatientSex = v;
     notifyListeners();
   }
 
@@ -203,7 +229,13 @@ class AppState extends ChangeNotifier {
 
       var patient = currentPatient;
       if (patient == null) {
-        patient = Patient(name: 'Unnamed patient', createdAt: DateTime.now());
+        final name = pendingPatientName.trim();
+        patient = Patient(
+          name: name.isEmpty ? 'Unnamed patient' : name,
+          age: int.tryParse(pendingPatientAge.trim()),
+          sex: pendingPatientSex.trim().isEmpty ? null : pendingPatientSex.trim(),
+          createdAt: DateTime.now(),
+        );
         final id = await DbService.instance.insertPatient(patient);
         patient = patient.copyWith(id: id);
       }

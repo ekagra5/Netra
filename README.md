@@ -14,6 +14,19 @@ review" flow instead of guessing. **It's a screening aid, not a diagnosis**
 — the point is to tell a health worker who needs a specialist visit, not to
 replace an ophthalmologist.
 
+## Screenshots
+
+| Onboarding | Home | New scan |
+|---|---|---|
+| ![Onboarding](docs/screenshots/onboarding.png) | ![Home](docs/screenshots/home.png) | ![New scan](docs/screenshots/new_scan.png) |
+
+| Result | Attention heatmap | Findings | Settings |
+|---|---|---|---|
+| ![Result](docs/screenshots/results.png) | ![Heatmap](docs/screenshots/heatmap.png) | ![Findings](docs/screenshots/findings.png) | ![Settings](docs/screenshots/settings.png) |
+
+All captured from a real release build running on an Android emulator —
+not mockups.
+
 ## Not a medical device
 
 This is a research/hackathon project, not a certified diagnostic tool. It
@@ -121,9 +134,9 @@ python3 -m venv .venv
   restarts) but there is currently no backend to actually sync *to* — "Sync
   now" marks queued scans as synced locally. Wiring up a real clinic-server
   endpoint is the next real milestone, not a cosmetic one.
-- The occlusion-sensitivity heatmap uses a coarse 8×8 grid (64 forward
-  passes) to stay fast on a mid-range phone. Finer-grained heatmaps are
-  possible at the cost of speed.
+- The occlusion-sensitivity heatmap uses a 7×7 grid (49 forward passes,
+  matching the original prototype) to stay fast on a mid-range phone.
+  Finer-grained heatmaps are possible at the cost of speed.
 - See [Accuracy](#accuracy) above for the model's real, current limits.
 
 ## License
