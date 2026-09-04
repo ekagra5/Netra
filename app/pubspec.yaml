@@ -41,7 +41,12 @@ dependencies:
 
   # On-device inference for the three-head MobileNetV2 model (DR grade,
   # DME risk, ocular findings) — no network calls, ever.
-  tflite_flutter: ^0.11.0
+  # Pinned to >=0.12.1: 0.11.0's bundled tensorflow-lite AARs
+  # (tensorflow-lite / tensorflow-lite-gpu / tensorflow-lite-api, all
+  # 2.11.0) share the namespace "org.tensorflow.lite", which recent AGP
+  # rejects outright at manifest-merge time ("used in multiple modules").
+  # 0.12.1 updates those dependencies to versions with distinct namespaces.
+  tflite_flutter: ^0.12.1
 
   # Pure-Dart image decode/resize/crop — mirrors the preprocessing the
   # Python app did with OpenCV, without needing a native OpenCV binding.

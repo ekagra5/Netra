@@ -33,6 +33,15 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# Native Android/iOS build output (android/build/, android/app/build/,
+# android/.gradle/, ios/Pods/, etc.) - the stock Flutter scaffold's
+# /build/ above only covers the top-level dir, not these nested ones.
+android/build/
+android/**/build/
+android/.gradle/
+ios/Pods/
+ios/.symlinks/
+
 # Symbolication related
 app.*.symbols
 
