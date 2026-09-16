@@ -18,9 +18,12 @@ except ImportError:
     import tensorflow as tf
     Interpreter = tf.lite.Interpreter
 
+# All three overridable via CLI args since they point at wherever you
+# downloaded the model/IDRiD test split - defaults assume a local
+# `idrid_test/` folder laid out the same way as the official download.
 MODEL_PATH = sys.argv[1] if len(sys.argv) > 1 else "model_apex_v2.tflite"
-TEST_IMG_DIR = "/Users/ekagra/Downloads/B. Disease Grading/1. Original Images/b. Testing Set"
-TEST_CSV = "/Users/ekagra/Downloads/B. Disease Grading/2. Groundtruths/b. IDRiD_Disease Grading_Testing Labels.csv"
+TEST_IMG_DIR = sys.argv[2] if len(sys.argv) > 2 else "idrid_test/1. Original Images/b. Testing Set"
+TEST_CSV = sys.argv[3] if len(sys.argv) > 3 else "idrid_test/2. Groundtruths/b. IDRiD_Disease Grading_Testing Labels.csv"
 
 NORMALIZE_TO_MINUS1_1 = True
 NUM_GRADES = 5

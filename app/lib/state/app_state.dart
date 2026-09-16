@@ -1,5 +1,5 @@
 // Single app-wide state object, deliberately mirroring the shape of the
-// Claude Design prototype's Component.state / renderVals(): one `screen`
+// earlier design prototype's Component.state / renderVals(): one `screen`
 // enum drives which full-bleed view is shown, and navigation is a small
 // fixed graph of named transitions (goHome, backToResults, ...) rather
 // than a general Navigator stack - the prototype has no back-stack either

@@ -2,10 +2,10 @@
 //
 // The visual language (thick 2px dividers, uppercase tracked micro-labels,
 // bold oversized numerals for the grade readout, flat 1990s-Swiss-poster
-// "modernist" cards) is ported from the Claude Design canvas prototype for
-// this app. That prototype's actual color/type tokens weren't available
-// when this was built, so the palette below is a deliberate substitute:
-// red + white + near-black, per direction from the project owner.
+// "modernist" cards) is ported from the app's earlier design prototype.
+// That prototype's actual color/type tokens weren't available when this
+// was built, so the palette below is a deliberate substitute: red + white
+// + near-black, per direction from the project owner.
 //
 // One departure from a pure red/white palette, on purpose: the DR severity
 // scale (grade 0-4) keeps its own green -> amber -> red progression instead

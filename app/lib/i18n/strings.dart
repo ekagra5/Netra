@@ -1,10 +1,9 @@
-// English/Hindi copy for the app. Ported from the Claude Design canvas
-// prototype (Netra DR Screening App.dc.html), which is itself the
-// second-generation copy deck after the original Streamlit prototype
-// (apex_app.py) proved the screening flow. A handful of keys not present
-// in the design (model-status wording, low-confidence warning copy) are
-// carried over from that original app's TEXT dict so the real inference
-// pipeline has strings to show.
+// English/Hindi copy for the app. Ported from the app's design prototype
+// copy deck, which is itself the second-generation copy deck after the
+// original Streamlit prototype (apex_app.py) proved the screening flow.
+// A handful of keys not present in the design (model-status wording,
+// low-confidence warning copy) are carried over from that original app's
+// TEXT dict so the real inference pipeline has strings to show.
 library;
 
 enum AppLanguage { en, hi }
