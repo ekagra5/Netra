@@ -180,20 +180,25 @@ class NsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accent = accentBorder;
     final card = Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(NetraSpace.s4),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: NetraColors.bg,
         borderRadius: BorderRadius.circular(NetraRadius.card),
-        border: Border(
-          top: const BorderSide(color: NetraColors.divider, width: 2),
-          right: const BorderSide(color: NetraColors.divider, width: 2),
-          bottom: const BorderSide(color: NetraColors.divider, width: 2),
-          left: BorderSide(color: accentBorder ?? NetraColors.divider, width: accentBorder != null ? 4 : 2),
-        ),
+        // Flutter only allows rounded corners on a border with uniform sides, so the
+        // thicker accent edge is painted over the left side instead of styling it.
+        border: Border.all(color: NetraColors.divider, width: 2),
       ),
-      child: child,
+      child: Stack(
+        fit: StackFit.passthrough,
+        children: [
+          Padding(padding: const EdgeInsets.all(NetraSpace.s4), child: child),
+          if (accent != null)
+            Positioned(left: -2, top: -2, bottom: -2, width: 4, child: ColoredBox(color: accent)),
+        ],
+      ),
     );
     if (onTap == null) return card;
     return InkWell(onTap: onTap, child: card);
